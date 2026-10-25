@@ -8,7 +8,7 @@ A fully-offline virtual pet that gets attached, sulks, and changes color with he
 
 ![Gameplay](yamidamari.gif)
 
-[Author: 1–2 sentences on why you made this]
+I wanted a small game I could check on between tasks and feel a little calmer. You can leave her to grow on her own, and when you come back, her look and attitude have changed with her mood. To keep it from getting boring, I packed in the things I enjoy myself: dress-up, room decorating, talking to her, and mini-games.
 
 ## How to play
 
