@@ -1,0 +1,30 @@
+# 依存・ビルド成果物
+node_modules/
+dist/
+*.zip
+
+# ローカル運用（バックアップ・旧版）
+backups/
+_archive/
+*.backup.html
+index.*.html
+verify_launch.png
+
+# Claude Code のローカル設定
+.claude/settings.local.json
+CLAUDE.local.md
+
+# 秘密情報（念のため）
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# OS・エディタ・ログ
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+*.log
+npm-debug.log*
