@@ -3206,6 +3206,11 @@ function safeGetItem(key) {
   try { return localStorage.getItem(key); } catch (e) { return null; }
 }
 
+// localStorage.removeItem を安全に呼ぶ（失敗しても処理を止めない）
+function safeRemoveItem(key) {
+  try { localStorage.removeItem(key); } catch (e) {}
+}
+
 function saveGame() {
   const data = {
     hunger:    S.hunger,
@@ -3291,6 +3296,8 @@ function loadGame() {
 
   let data;
   try { data = JSON.parse(raw); } catch { applyPrevInfluence(); return; }
+  // 改ざん対策：中身が null や数値などオブジェクト以外なら新しい子として始める
+  if (!data || typeof data !== 'object' || Array.isArray(data)) { applyPrevInfluence(); return; }
 
   // 保存値を S に反映（数値フィールドはNaN・範囲外を弾いて安全に復元する）
   S.hunger    = safeNum(data.hunger,  S.hunger,  0,   100);
@@ -7369,7 +7376,7 @@ requestAnimationFrame(animLoop); // 待機アニメーションループを開�
 drawAnimatedPet();                // ループ開始前の一瞬の空白を埋めるための即時描画
 
 // ── 初回チェック：名前が未設定ならオープニングを表示 ──
-if (!localStorage.getItem(PET_NAME_KEY)) {
+if (!safeGetItem(PET_NAME_KEY)) {
   drawOpeningChar();
   document.getElementById('op-overlay').style.display = 'flex';
 } else {
@@ -7742,11 +7749,13 @@ function savePrevInfluence(lastRecord) {
 
 // 前の子の影響を初期ステータスに反映する（セーブデータがない新しい子のみ・一度だけ適用）
 function applyPrevInfluence() {
-  const raw = localStorage.getItem(PREV_INFLUENCE_KEY);
+  const raw = safeGetItem(PREV_INFLUENCE_KEY);
   if (!raw) return;
   let inf;
   try { inf = JSON.parse(raw); } catch { return; }
-  localStorage.removeItem(PREV_INFLUENCE_KEY); // 適用後は削除して二重適用を防ぐ
+  safeRemoveItem(PREV_INFLUENCE_KEY); // 適用後は削除して二重適用を防ぐ
+  // 改ざん対策：オブジェクト以外なら何も反映しない
+  if (!inf || typeof inf !== 'object' || Array.isArray(inf)) return;
 
   if (inf.type === 'bond') {
     // 絆エンドの影響：次の子は愛情高め・精神安定気味でスタート
@@ -7929,9 +7938,9 @@ function restartGame() {
     savePrevInfluence(endHistory[endHistory.length - 1]);
   }
   incrementGeneration();
-  localStorage.removeItem(SAVE_KEY);
-  localStorage.removeItem(PET_NAME_KEY);
-  localStorage.removeItem(SKIN_SAVE_KEY);
+  safeRemoveItem(SAVE_KEY);
+  safeRemoveItem(PET_NAME_KEY);
+  safeRemoveItem(SKIN_SAVE_KEY);
   location.reload();
 }
 
@@ -8869,7 +8878,7 @@ document.getElementById('zukan-overlay').addEventListener('click', e => {
       var ev=((document.getElementById('event-label')||{}).textContent)||'';
       var emo=((document.getElementById('emotion-name')||{}).textContent)||'';
       var mood=parseFloat(((document.getElementById('v-mood')||{}).textContent)||'50');
-      var gen=parseInt(localStorage.getItem('ai-pet-generation')||'1',10);
+      var gen=1; try { gen=parseInt(localStorage.getItem('ai-pet-generation')||'1',10); } catch(e){}
       if(/闇落ち|病み|こわれ|くらやみ|絶望/.test(emo)) return 'yami';
       if(/天使|しあわせ|幸せ|すきすき|だいすき|ごきげん/.test(emo)) return 'pastel';
       if(/SNS|廃人|通知|モニタ|ネット/.test(ev)) return 'monitor';
