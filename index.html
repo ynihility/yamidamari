@@ -7786,6 +7786,8 @@ function loadEndHistory() {
   catch { endHistory = []; }
   // 改ざん・旧スキーマ対策：配列でなければ空に戻す
   if (!Array.isArray(endHistory)) endHistory = [];
+  // 改ざん対策：要素がオブジェクトでないもの（null・数値・配列など）は捨てる
+  endHistory = endHistory.filter(r => r && typeof r === 'object' && !Array.isArray(r));
   // 巨大な既存セーブを読んでも上限まで切り詰める（新しい方を残す）
   if (endHistory.length > END_HISTORY_MAX) endHistory = endHistory.slice(-END_HISTORY_MAX);
 }
