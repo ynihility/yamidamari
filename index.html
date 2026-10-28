@@ -3139,7 +3139,7 @@ function handleChat() {
 
 document.getElementById('chat-send').addEventListener('click', handleChat);
 document.getElementById('chat-input').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.isComposing) handleChat();
+  if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) handleChat();
 });
 
 // ============================================================
@@ -3209,6 +3209,29 @@ function safeGetItem(key) {
 // localStorage.removeItem を安全に呼ぶ（失敗しても処理を止めない）
 function safeRemoveItem(key) {
   try { localStorage.removeItem(key); } catch (e) {}
+}
+
+// localStorage から 0 以上の整数を安全に読む（"abc" などの改ざん値は def に戻す）
+function safeGetInt(key, def) {
+  const n = parseInt(safeGetItem(key), 10);
+  return Number.isFinite(n) && n >= 0 ? n : def;
+}
+
+// 改ざん対策：配列から「既知のIDの文字列」だけを残し、重複を除く
+function safeIdList(arr, validIds) {
+  if (!Array.isArray(arr)) return [];
+  return [...new Set(arr.filter(x => typeof x === 'string' && validIds.has(x)))];
+}
+
+// 改ざん対策：感情ごとの回数マップを「既知の感情キー → 数値」だけに絞る
+function safeCountMap(o) {
+  const out = {};
+  if (o && typeof o === 'object' && !Array.isArray(o)) {
+    for (const k of Object.keys(o)) {
+      if (Object.prototype.hasOwnProperty.call(EMOTIONS, k)) out[k] = safeNum(o[k], 0, 0, 9999999);
+    }
+  }
+  return out;
 }
 
 function saveGame() {
@@ -3320,17 +3343,19 @@ function loadGame() {
   S.lastChallengeDate   = data.lastChallengeDate ?? '';
   S.maxRunnerWave  = safeNum(data.maxRunnerWave, 0, 0, 9999);
   S.points         = safeNum(data.points, 0, 0, 9999999);
-  S.ownedRooms     = Array.isArray(data.ownedRooms) ? data.ownedRooms : [];
-  S.roomChoice     = data.roomChoice     ?? 'auto';
-  S.ownedPlants    = Array.isArray(data.ownedPlants) ? data.ownedPlants : [];
-  S.plantChoice    = data.plantChoice    ?? 'none';
+  // 改ざん対策：既知のIDだけを残し、選択中の値も所持しているものに限る
+  S.ownedRooms     = safeIdList(data.ownedRooms, new Set(ROOM_SHOP.map(r => r.id)));
+  S.roomChoice     = (typeof data.roomChoice === 'string' && ROOM_SHOP.some(r => r.id === data.roomChoice) && roomOwned(data.roomChoice)) ? data.roomChoice : 'auto';
+  S.ownedPlants    = safeIdList(data.ownedPlants, new Set(PLANTS.map(p => p.id)));
+  S.plantChoice    = (typeof data.plantChoice === 'string' && PLANTS.some(p => p.id === data.plantChoice) && (data.plantChoice === 'none' || S.ownedPlants.includes(data.plantChoice))) ? data.plantChoice : 'none';
   S.dailyChats     = safeNum(data.dailyChats, 0, 0, 9999);
   S.dailyStartLv   = safeNum(data.dailyStartLv, S.level, 1, 9999);
   S.totalFeeds     = safeNum(data.totalFeeds, 0, 0, 9999999);
   S.totalChats     = safeNum(data.totalChats, 0, 0, 9999999);
   S.bs              = safeNum(data.bs, 60, 0, 100);
-  S.cakeReboundAt   = safeNum(data.cakeReboundAt, 0, 0, Infinity);
-  S.energyReboundAt = safeNum(data.energyReboundAt, 0, 0, Infinity);
+  // 時計の巻き戻し・改ざん対策：本来の最大期間より先の時刻は切り詰める
+  S.cakeReboundAt   = Math.min(safeNum(data.cakeReboundAt, 0, 0, Infinity),   Date.now() + 180000);
+  S.energyReboundAt = Math.min(safeNum(data.energyReboundAt, 0, 0, Infinity), Date.now() + 120000);
   S.snacksSeen           = Array.isArray(data.snacksSeen)           ? data.snacksSeen           : [];
   S.clingyCount          = safeNum(data.clingyCount, 0, 0, 99999);
   S.kaerukaEver          = data.kaerukaEver          ?? false;
@@ -3352,8 +3377,8 @@ function loadGame() {
   S.recentInputs    = Array.isArray(data.recentInputs) ? data.recentInputs.slice(-10) : [];
   S.chatMemory      = Array.isArray(data.chatMemory)   ? data.chatMemory.slice(-3)    : [];
   S.clean           = safeNum(data.clean, 60, 0, 100);
-  S.bathCDUntil     = safeNum(data.bathCDUntil, 0, 0, Infinity);
-  S.petCDUntil      = safeNum(data.petCDUntil, 0, 0, Infinity);
+  S.bathCDUntil     = Math.min(safeNum(data.bathCDUntil, 0, 0, Infinity), Date.now() + 180000);
+  S.petCDUntil      = Math.min(safeNum(data.petCDUntil, 0, 0, Infinity),  Date.now() + 30000);
   S.sleepCDDate     = data.sleepCDDate     ?? '';
   S.totalPets       = safeNum(data.totalPets, 0, 0, 99999);
   S.bathEver        = data.bathEver        ?? false;
@@ -3372,13 +3397,14 @@ function loadGame() {
     : { ..._dsc };
   S.totalBaths    = safeNum(data.totalBaths,  0, 0, 99999);
   S.totalSleeps   = safeNum(data.totalSleeps, 0, 0, 99999);
-  S.emotionCounts = (data.emotionCounts && typeof data.emotionCounts === 'object') ? data.emotionCounts : {};
+  S.emotionCounts = safeCountMap(data.emotionCounts);
   S.playDates     = Array.isArray(data.playDates) ? data.playDates.slice(-365) : [];
   S.maxLevel      = safeNum(data.maxLevel, S.level, 1, 9999);
   // タイマーはまだ未来の値なら復元（過去の値は捨てる）
   const now0 = Date.now();
-  if (data.kaerukaUntil && data.kaerukaUntil > now0) kaerukaUntil = data.kaerukaUntil;
-  if (data.pikirUntil   && data.pikirUntil   > now0) pikirUntil   = data.pikirUntil;
+  const kU = safeNum(data.kaerukaUntil, 0), pU = safeNum(data.pikirUntil, 0);
+  if (kU > now0) kaerukaUntil = Math.min(kU, now0 + 25000);
+  if (pU > now0) pikirUntil   = Math.min(pU, now0 + 20000);
   checkDailyReset();  // 起動時に日付変わっていれば日次リセット
   // feedTimes・sessionStart はセッションごとにリセット
 
@@ -3490,7 +3516,7 @@ function loadMonthlyStats() {
         sleeps:        safeNum(data.sleeps, 0, 0, 9999999),
         mgPlays:       safeNum(data.mgPlays, 0, 0, 9999999),
         rgPlays:       safeNum(data.rgPlays, 0, 0, 9999999),
-        emotionCounts: data.emotionCounts || {},
+        emotionCounts: safeCountMap(data.emotionCounts),
       };
     } else {
       // 月が変わっていたら空でリセット
@@ -3611,7 +3637,7 @@ function renderRecords() {
   const el = document.getElementById('records-box');
   if (!el) return;
   let best = 0;
-  try { best = parseInt(localStorage.getItem('ai-pet-ar-best') || '0', 10); } catch(e) {}
+  best = safeGetInt('ai-pet-ar-best', 0);
   const gen = (typeof currentGeneration !== 'undefined') ? currentGeneration : 1;
   let achN = 0, achT = 0;
   try { achN = (typeof unlockedAch !== 'undefined') ? unlockedAch.length : 0; achT = (typeof window !== 'undefined' && window.ACH_TOTAL) ? window.ACH_TOTAL : 0; } catch(e) {}
@@ -4018,9 +4044,11 @@ function checkCollectionRewards() {
 }
 
 // ── はじめてのお世話チェックリスト（初回オンボーディング） ──
+let firstTasksDoneMem = false;  // ストレージに書けない環境でも、ご褒美を1回だけにする
 function renderFirstTasks() {
   const el = document.getElementById('firsttask-box');
   if (!el) return;
+  if (firstTasksDoneMem) { el.style.display = 'none'; return; }
   let done = false;
   try { done = !!localStorage.getItem('ai-pet-firsttasks-done'); } catch(e) {}
   if (done) { el.style.display = 'none'; return; }
@@ -4035,7 +4063,8 @@ function renderFirstTasks() {
   const allDone = tasks.every(t => t.ok);
   if (allDone) {
     // 全部達成 → 一度だけご褒美を出して非表示に
-    try { localStorage.setItem('ai-pet-firsttasks-done','1'); } catch(e) {}
+    firstTasksDoneMem = true;
+    safeSetItem('ai-pet-firsttasks-done','1');
     if (typeof addXP === 'function') addXP(30);
     if (typeof S !== 'undefined') { S.mood = Math.min(100, S.mood + 10); S.aff = Math.min(100, S.aff + 5); }
     if (typeof notify === 'function') notify('🎉 はじめてのお世話コンプリート！ XP+30  なつき度+5');
@@ -4100,6 +4129,7 @@ function loadRareLog() {
   try { rareLog = JSON.parse(localStorage.getItem(RARE_LOG_KEY) || '[]'); } catch { rareLog = []; }
   // 改ざん・旧スキーマ対策：配列でなければ空に戻す
   if (!Array.isArray(rareLog)) rareLog = [];
+  rareLog = safeIdList(rareLog, new Set(RARE_TYPES.map(r => r.id)));
 }
 function saveRareLog() {
   safeSetItem(RARE_LOG_KEY, JSON.stringify(rareLog));
@@ -5914,6 +5944,11 @@ function mgShuffle(arr) {
 }
 
 function mgOpen() {
+  // 二重起動対策：開いている間は再入しない。前回のタイマーを掃除し、ボタンのフォーカスを外す
+  if (document.getElementById('mg-overlay').classList.contains('open')) return;
+  clearInterval(mg.timerID);
+  if (mg._nextTimer) { clearTimeout(mg._nextTimer); mg._nextTimer = null; }
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   mg.questions = mgShuffle(MG_Q).slice(0, MG_ROUNDS);
   mg.current   = 0;
   mg.bestCount = 0;
@@ -6195,6 +6230,11 @@ const rg = {
 };
 
 function rgOpen() {
+  // 二重起動対策：開いている間は再入しない。前回のタイマー・rAFを掃除し、ボタンのフォーカスを外す
+  if (document.getElementById('rg-overlay').classList.contains('open')) return;
+  if (rg._nextTimer) { clearTimeout(rg._nextTimer); rg._nextTimer = null; }
+  if (rg.rafID) { cancelAnimationFrame(rg.rafID); rg.rafID = null; }
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   SND.sfxBtn();
   SND.ensureCtx();
   rg.round    = 0;
@@ -7097,7 +7137,7 @@ document.getElementById('op-default-btn').addEventListener('click', () => {
   startGame('');
 });
 document.getElementById('op-name-input').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.isComposing) startGame(e.target.value);
+  if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) startGame(e.target.value);
 });
 
 // 名前変更ダイアログ
@@ -7462,6 +7502,7 @@ function loadAch() {
   catch { unlockedAch = []; }
   // 改ざん・旧スキーマ対策：配列でなければ空に戻す
   if (!Array.isArray(unlockedAch)) unlockedAch = [];
+  unlockedAch = safeIdList(unlockedAch, new Set(ACHIEVEMENTS.map(a => a.id)));
 }
 
 function saveAch() {
@@ -7751,9 +7792,9 @@ function savePrevInfluence(lastRecord) {
 function applyPrevInfluence() {
   const raw = safeGetItem(PREV_INFLUENCE_KEY);
   if (!raw) return;
+  safeRemoveItem(PREV_INFLUENCE_KEY); // 読んだら先に削除（二重適用・壊れたデータの残留を防ぐ）
   let inf;
   try { inf = JSON.parse(raw); } catch { return; }
-  safeRemoveItem(PREV_INFLUENCE_KEY); // 適用後は削除して二重適用を防ぐ
   // 改ざん対策：オブジェクト以外なら何も反映しない
   if (!inf || typeof inf !== 'object' || Array.isArray(inf)) return;
 
@@ -7805,8 +7846,12 @@ function saveEndToHistory(record) {
 //
 // 絆エンド条件：
 //   Lv10以上 ＋ なつき度≥80 ＋ 7日以上継続ログイン ＋ 累計50回以上の会話
+const END_PENDING_KEY = 'ai-pet-end-pending'; // エンド画面を出したまま閉じた場合の印（「新しい子」で消す）
 function checkEndConditions() {
   if (endTriggered) return;
+  // エンド画面のままリロードした場合：記録は増やさず、画面だけ出し直す
+  const pend = safeGetItem(END_PENDING_KEY);
+  if (pend === 'bad' || pend === 'bond') { endTriggered = true; showEndScreen(pend); return; }
 
   // バッドエンド
   if (
@@ -7850,6 +7895,7 @@ function triggerEnd(type) {
     yami:            Math.floor(S.yami),
   };
   saveEndToHistory(record);
+  safeSetItem(END_PENDING_KEY, type);
   unlockAch(type === 'bad' ? 'end_bad' : 'end_bond');
   saveAch();
   showEndScreen(type);
@@ -7934,7 +7980,11 @@ function showEndScreen(type) {
 
 // セーブデータのみ削除してオープニングからリスタート
 // エンド履歴・実績・レアログ・世代番号は削除しない
+let restarting = false;  // 二重クリックで世代が2つ進むのを防ぐ
 function restartGame() {
+  if (restarting) return;
+  restarting = true;
+  safeRemoveItem(END_PENDING_KEY);
   // 前の子の影響データを保存してから世代を進める
   if (endHistory.length > 0) {
     savePrevInfluence(endHistory[endHistory.length - 1]);
@@ -8018,7 +8068,7 @@ function openAlbumPanel() {
       const endLabel = rec.type === 'bond' ? '絆エンド' : '別れエンド';
       const endClass = rec.type === 'bond' ? 'album-card-end-bond' : 'album-card-end-bad';
       const gen      = rec.generation || '?';
-      const perLabel = PERSONALITY_LABELS[rec.personalityType] || '記録なし';
+      const perLabel = (Object.prototype.hasOwnProperty.call(PERSONALITY_LABELS, rec.personalityType) ? PERSONALITY_LABELS[rec.personalityType] : '記録なし');
 
       card.innerHTML =
         `<canvas class="album-portrait" width="48" height="48"></canvas>` +
@@ -8137,7 +8187,7 @@ function saveAlbumImage() {
       sctx.fillText(isBond ? '絆エンド' : '別れエンド', 56, y + 42);
 
       // 詳細（右寄せ）
-      const perLabel = PERSONALITY_LABELS[rec.personalityType] || '記録なし';
+      const perLabel = (Object.prototype.hasOwnProperty.call(PERSONALITY_LABELS, rec.personalityType) ? PERSONALITY_LABELS[rec.personalityType] : '記録なし');
       sctx.fillStyle = '#554477';
       sctx.font      = '9px "Courier New", monospace';
       sctx.textAlign = 'right';
@@ -8661,8 +8711,9 @@ document.getElementById('zukan-overlay').addEventListener('click', e => {
   try {
     var KEY = 'ai-pet-birth-at';
     var b = localStorage.getItem(KEY);
-    if (!b) { b = String(Date.now()); localStorage.setItem(KEY, b); }
-    var days = Math.max(1, Math.floor((Date.now() - Number(b)) / 86400000) + 1);
+    if (!b || !isFinite(Number(b)) || Number(b) <= 0) { b = String(Date.now()); safeSetItem(KEY, b); }
+    // 時計を戻した場合も記録は消さず、表示だけ DAY 1 以上に丸める
+    var days = Math.max(1, Math.floor((Date.now() - Math.min(Number(b), Date.now())) / 86400000) + 1);
     var dn = document.getElementById('nl-daynum');
     var dj = document.getElementById('nl-dayjp');
     if (dn) dn.textContent = 'DAY ' + days;
@@ -8876,11 +8927,12 @@ document.getElementById('zukan-overlay').addEventListener('click', e => {
     function pickType(){
       if(window.__forceRoom) return window.__forceRoom;
       // プレイヤーが装備した部屋を最優先（'auto'なら従来の気分連動）
-      try { var rc = localStorage.getItem('ai-pet-room-choice'); if(rc && rc!=='auto' && ROOMS[rc]) return rc; } catch(e){}
+      try { var rc = localStorage.getItem('ai-pet-room-choice'); if(rc && rc!=='auto' && Object.prototype.hasOwnProperty.call(ROOMS, rc)) return rc; } catch(e){}
       var ev=((document.getElementById('event-label')||{}).textContent)||'';
       var emo=((document.getElementById('emotion-name')||{}).textContent)||'';
       var mood=parseFloat(((document.getElementById('v-mood')||{}).textContent)||'50');
       var gen=1; try { gen=parseInt(localStorage.getItem('ai-pet-generation')||'1',10); } catch(e){}
+      if(!isFinite(gen) || gen<1) gen=1;
       if(/闇落ち|病み|こわれ|くらやみ|絶望/.test(emo)) return 'yami';
       if(/天使|しあわせ|幸せ|すきすき|だいすき|ごきげん/.test(emo)) return 'pastel';
       if(/SNS|廃人|通知|モニタ|ネット/.test(ev)) return 'monitor';
@@ -8997,14 +9049,14 @@ document.getElementById('zukan-overlay').addEventListener('click', e => {
 
   var ENEMY={ puni:{w:16,h:12,vx:30,stompable:true,fly:false}, ghost:{w:14,h:16,vx:20,stompable:true,fly:true}, spiky:{w:16,h:13,vx:12,stompable:false,fly:false} };
 
-  window.arPlays=function(){ try{return parseInt(localStorage.getItem(PLAYS_KEY)||'0',10);}catch(e){return 0;} };
+  window.arPlays=function(){ var n; try{ n=parseInt(localStorage.getItem(PLAYS_KEY)||'0',10); }catch(e){ return 0; } return (isFinite(n)&&n>=0)?n:0; };
   window.__arDebug=function(){ if(!ar) return null;
     var pen=0;
     if(ar.enemies&&ar.obstacles){ for(var i=0;i<ar.enemies.length;i++){ var e=ar.enemies[i]; var d=ENEMY[e.type]; if(d.fly) continue;
       for(var j=0;j<ar.obstacles.length;j++){ var o=ar.obstacles[j]; var oTop=AR_GROUND-o.h;
         if(e.y+d.h>oTop+3 && e.x+3<o.x+o.w && e.x+d.w-3>o.x) pen++; } } }
     return {mode:ar.mode, bs:ar.boss&&ar.boss.state, bx:ar.boss&&Math.round(ar.boss.x), hp:ar.boss&&ar.boss.hp, py:Math.round(ar.petY), og:ar.onGround, sc:score(), ended:ar.ended, enemies:ar.enemies?ar.enemies.length:0, combo:ar.combo, maxCombo:ar.maxCombo, comboBonus:ar.comboBonus, pipePen:pen, ghost:(function(){ if(!ar.enemies) return null; for(var i=0;i<ar.enemies.length;i++){ if(ar.enemies[i].type==='ghost') return {x:Math.round(ar.enemies[i].x), y:Math.round(ar.enemies[i].y)}; } return null; })()}; };
-  function arBest(){ try{return parseInt(localStorage.getItem(BEST_KEY)||'0',10);}catch(e){return 0;} }
+  function arBest(){ var n; try{ n=parseInt(localStorage.getItem(BEST_KEY)||'0',10); }catch(e){ return 0; } return (isFinite(n)&&n>=0)?n:0; }
 
   var ar=null, canvas=null, ctx=null, rafID=null;
 
@@ -9362,9 +9414,9 @@ document.getElementById('zukan-overlay').addEventListener('click', e => {
   function endGame(won){
     if(!ar || ar.ended) return; ar.ended=true; if(rafID) cancelAnimationFrame(rafID);
     var sc=score();
-    try{ localStorage.setItem(PLAYS_KEY, String(window.arPlays()+1)); }catch(e){}
+    safeSetItem(PLAYS_KEY, String(window.arPlays()+1));
     var prevBest=arBest(); var newBest=sc>prevBest;
-    if(newBest){ try{ localStorage.setItem(BEST_KEY, String(sc)); }catch(e){} }
+    if(newBest){ safeSetItem(BEST_KEY, String(sc)); }
     // 今日のチャレンジ（ランナースコア）連携＋最高ウェーブ記録
     if(typeof S!=='undefined'){ S.dailyRunnerScore = Math.max(S.dailyRunnerScore||0, sc);
       if(ar.endless){ S.maxRunnerWave = Math.max(S.maxRunnerWave||0, ar.bossWave-1); }
